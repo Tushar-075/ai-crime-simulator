@@ -1,44 +1,48 @@
 import json
 import random
 import os
-import time
 from functools import lru_cache
-from google import genai
-from google.genai.errors import ClientError
+import google.generativeai as genai
 from dotenv import load_dotenv
 from prompts import *
 
+# ── LOAD ENV ─────────────────────────────
 load_dotenv()
-client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+API_KEY = os.getenv("GOOGLE_API_KEY")
 
-MODEL = "models/gemini-2.5-flash"  
+# Configure Gemini
+genai.configure(api_key=API_KEY)
+
+MODEL = "gemini-1.5-flash"   # ⚠️ 2.5 flash not supported in this SDK reliably
+
+
+# ── SAFE CACHED CALL ─────────────────────
 @lru_cache(maxsize=200)
 def cached_call(prompt: str, temperature: float):
     try:
-        response = client.models.generate_content(
-            model=MODEL,
-            contents=prompt,
-            config={"temperature": temperature},
-        )
+        model = genai.GenerativeModel(MODEL)
+        response = model.generate_content(prompt)
         return response.text.strip()
 
-    except ClientError as e:
-        if "429" in str(e):
-            return " The suspect pauses, clearly overwhelmed... try again shortly."
-        return " AI error occurred."
+    except Exception as e:
+        print("Gemini Error:", e)
+        return None
 
 
-# ── CASE GENERATION ──────────────────────────────────
-
+# ── CASE GENERATION ──────────────────────
 def generate_case():
     try:
         raw = cached_call(CASE_GENERATION_PROMPT, 0.9)
-        case = json.loads(raw)
 
-        for s in case["suspects"]:
-            s.setdefault("secret", "They are hiding something personal.")
+        if raw:
+            case = json.loads(raw)
 
-        return case
+            for s in case["suspects"]:
+                s.setdefault("secret", "They are hiding something personal.")
+
+            return case
+
+        return _fallback_case()
 
     except:
         return _fallback_case()
@@ -73,12 +77,11 @@ def _fallback_case():
     }
 
 
-# ── INTERROGATION ───────────────────────────────────
-
+# ── INTERROGATION ────────────────────────
 def interrogate_suspect(case, name, question, history=None, pressure=False):
     suspect = next(s for s in case["suspects"] if s["name"] == name)
 
-    # limit spam calls
+    # limit spam
     if history and len(history) >= 5:
         return "They repeat themselves, clearly irritated."
 
@@ -95,13 +98,21 @@ def interrogate_suspect(case, name, question, history=None, pressure=False):
         clues="\n".join(c["description"] for c in case["clues"]),
     )
 
-    prompt = f"Detective: {question}\n{name}:"
+    prompt = f"{system}\n\nDetective: {question}\n{name}:"
 
-    return cached_call(system + "\n\n" + prompt, 0.7)
+    result = cached_call(prompt, 0.7)
+
+    # fallback if API fails
+    if result:
+        return result
+
+    if name == case["killer"]:
+        return f"{name} looks nervous. 'I already told you... I was at home.'"
+    else:
+        return f"{name} says calmly, 'I had nothing to do with it.'"
 
 
-# ── CLUE ANALYSIS (NO API) ───────────────────────────
-
+# ── CLUE ANALYSIS ────────────────────────
 def analyze_clue(case, examined):
     for clue in case["clues"]:
         if examined.lower() in clue["description"].lower():
@@ -110,8 +121,7 @@ def analyze_clue(case, examined):
     return "Nothing significant found."
 
 
-# ── SOLUTION ────────────────────────────────────────
-
+# ── SOLUTION ─────────────────────────────
 def explain_solution(case, accused):
     if accused == case["killer"]:
         return f"{accused} is guilty. The clues clearly pointed to them."
