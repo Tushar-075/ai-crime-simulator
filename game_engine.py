@@ -13,7 +13,7 @@ API_KEY = os.getenv("GOOGLE_API_KEY")
 # Configure Gemini
 genai.configure(api_key=API_KEY)
 
-MODEL = "gemini-1.5-flash"   # ⚠️ 2.5 flash not supported in this SDK reliably
+MODEL = "gemini-2.5-flash"   # 
 
 
 # ── SAFE CACHED CALL ─────────────────────
